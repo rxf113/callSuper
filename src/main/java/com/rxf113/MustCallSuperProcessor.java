@@ -62,6 +62,10 @@ public class MustCallSuperProcessor extends AbstractProcessor {
 
                 TypeElement typeElement = (TypeElement) rootElement;
 
+                if (typeElement.getKind() != ElementKind.CLASS) {
+                    return false;
+                }
+
                 //1. 获取父类的有自定义CallSuper注解的方法
                 List<ExecutableElement> methodWithCallSuperList = getSupClassMethodsWithCusAnnotation(typeElement);
 
