@@ -47,7 +47,8 @@ public class Sun extends Parent {
 2.2 编译项目
 ## 问题
 1. 只支持java8
-2. 对于有 maven-compile-plugin的项目不生效
+2. 只支持 src/main/java 这种标准目录结构的项目(可以修改 com.rxf113.MustCallSuperProcessor的getClassSourceCode方法中的filePath前缀)
+3. 对于有 maven-compile-plugin的项目不生效
 
 ## 备注
 
