@@ -62,7 +62,7 @@ public class MustCallSuperProcessor extends AbstractProcessor {
 
                 TypeElement typeElement = (TypeElement) rootElement;
 
-                //获取父类的有自定义CallSuper注解的方法
+                //1. 获取父类的有自定义CallSuper注解的方法
                 List<ExecutableElement> methodWithCallSuperList = getSupClassMethodsWithCusAnnotation(typeElement);
 
                 if (!methodWithCallSuperList.isEmpty()) {
@@ -74,7 +74,7 @@ public class MustCallSuperProcessor extends AbstractProcessor {
                             + " supClass with annotation methods: " + methodsStr);
 
 
-                    //获取当前类重写了父类方法的当前类方法
+                    //2. 获取当前类重写了父类方法的当前类方法
                     List<ExecutableElement> overrideMethodBySuperMethod = getOverrideMethodBySuperMethod(methodWithCallSuperList, typeElement);
                     //如果有重写父类的方法，校验这个方法第一行是否有调用 super.xxxx
 
@@ -100,10 +100,11 @@ public class MustCallSuperProcessor extends AbstractProcessor {
 
                         for (ExecutableElement executableElement : overrideMethodBySuperMethod) {
 
-                            //判断源码中, 方法第一行是否有调用 super.xxxx
+                            //3. 判断源码中, 方法第一行是否有调用 super.xxxx
                             boolean b = checkFirstStatementCallSuper(classSourceCode, executableElement);
 
                             if (!b) {
+                                //4. 校验不通过，抛异常
                                 throw new MustCallSuperException("class: " + typeElement.getQualifiedName().toString()
                                         + " method: " + executableElement.getSimpleName().toString()
                                         + " 第一行没调用父类的此方法");
