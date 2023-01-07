@@ -118,8 +118,8 @@ public class MustCallSuperProcessor extends AbstractProcessor {
 
                             if (!b) {
                                 //4. 校验不通过，抛异常
-                                throw new MustCallSuperException("class: " + typeElement.getQualifiedName().toString()
-                                        + " method: " + executableElement.getSimpleName().toString()
+                                throw new MustCallSuperException("class: " + "[" + typeElement.getQualifiedName().toString() + "],"
+                                        + " method: " + "[" + executableElement.getSimpleName().toString() + "]"
                                         + " 第一行没调用父类的此方法");
                             }
                         }
