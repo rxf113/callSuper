@@ -54,6 +54,7 @@ public class Sun extends Parent {
 ```
 
 2.1 在有需要的父类方法上加上 com.rxf113.MustCallSuper 注解
+
 例如:
 
 ```java
@@ -101,8 +102,7 @@ public abstract class Parent {
 > 解决: (可以修改 com.rxf113.MustCallSuperProcessor 的 getClassSourceCode 方法中的 filePath 前缀)
 
 3. 对于 idea build 操作，目前不支持在 build 过程中完成检查
-
-> 等待解决中...
+- 等待解决中...
 
 ## 备注
 
