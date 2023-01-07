@@ -54,6 +54,15 @@ public class MustCallSuperProcessor extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+        //idea build时，获取项目真实路径错误的问题
+        //描述: idea build 时，获取到的当前项目路径为  ...\AppData\Local\JetBrains\IntelliJIdea2022.2\compile-server\.
+        //todo 暂时跳过 idea build 的场景
+        String projectPath = System.getProperty("user.dir");
+        if (projectPath.matches(".*JetBrains.*IntelliJIdea.*compile-server")) {
+            messager.printMessage(Diagnostic.Kind.WARNING,"Idea build feature currently not supported");
+            return false;
+        }
+
         if (!roundEnv.processingOver()) {
 
             messager.printMessage(Diagnostic.Kind.NOTE, "Begin MustCallSuperProcessor... , rootElements size: " + roundEnv.getRootElements().size());
