@@ -17,11 +17,11 @@
     </properties>
 
     <dependencies>
-        <dependency>
-            <groupId>org.ow2.asm</groupId>
-            <artifactId>asm</artifactId>
-            <version>${asm.version}</version>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>org.ow2.asm</groupId>-->
+<!--            <artifactId>asm</artifactId>-->
+<!--            <version>${asm.version}</version>-->
+<!--        </dependency>-->
         <dependency>
             <groupId>com.github.javaparser</groupId>
             <artifactId>javaparser-core</artifactId>
@@ -32,6 +32,25 @@
 <!--            <artifactId>javaparser-symbol-solver-core</artifactId>-->
 <!--            <version>3.24.2</version>-->
 <!--        </dependency>-->
+        <!-- https://mvnrepository.com/artifact/com.intellij/annotations -->
+        <dependency>
+            <groupId>com.intellij</groupId>
+            <artifactId>annotations</artifactId>
+            <version>12.0</version>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/org.jetbrains/annotations -->
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <version>23.0.0</version>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/org.jetbrains.intellij.deps/trove4j -->
+        <dependency>
+            <groupId>org.jetbrains.intellij.deps</groupId>
+            <artifactId>trove4j</artifactId>
+            <version>1.0.20200330</version>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
 
     <build>
