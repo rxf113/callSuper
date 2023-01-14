@@ -17,6 +17,7 @@ import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
 import javax.lang.model.type.TypeMirror;
+import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
 import java.io.BufferedReader;
@@ -24,6 +25,8 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +45,13 @@ public class MustCallSuperProcessor extends AbstractProcessor {
 
     private Messager messager;
 
+    private static final Pattern CONTENT_IN_PARENTHESES_PATTERN = Pattern.compile("\\((.*?)\\)");
+
+    /**
+     * key: 全限类名，value: 类的所有方法。
+     * 目的：缓存类及对应方法，提高效率
+     */
+    private static final Map<String, List<ExecutableElement>> QUALIFIED_NAME_2_METHODS_CACHE_MAP = new HashMap<>(64, 1);
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
@@ -59,7 +69,7 @@ public class MustCallSuperProcessor extends AbstractProcessor {
         //todo 暂时跳过 idea build 的场景
         String projectPath = System.getProperty("user.dir");
         if (projectPath.matches(".*JetBrains.*IntelliJIdea.*compile-server")) {
-            messager.printMessage(Diagnostic.Kind.WARNING,"Idea build feature currently not supported");
+            messager.printMessage(Diagnostic.Kind.WARNING, "Idea build feature currently not supported");
             return false;
         }
 
@@ -75,21 +85,12 @@ public class MustCallSuperProcessor extends AbstractProcessor {
                     continue;
                 }
 
-                //1. 获取父类的有自定义MustCallSuper注解的方法
-                List<ExecutableElement> methodWithCallSuperList = getSupClassMethodsWithCusAnnotation(typeElement);
+                messager.printMessage(Diagnostic.Kind.NOTE, "Current class: " + typeElement.getQualifiedName());
 
-                if (!methodWithCallSuperList.isEmpty()) {
+                //递归获取当前类中重写的，并且在父类中有自定义注解 com.rxf113.MustCallSuper 的方法
+                List<ExecutableElement> methodsWithCusAnnotation = getOverrideMethodsWithCusAnnotationOfCuClass(typeElement);
 
-                    String methodsStr = methodWithCallSuperList.stream().map(it -> it.getSimpleName().toString())
-                            .collect(Collectors.joining());
-
-                    messager.printMessage(Diagnostic.Kind.NOTE, "Current class: " + typeElement.getQualifiedName()
-                            + " supClass with annotation methods: " + methodsStr);
-
-
-                    //2. 获取当前类重写了父类方法的当前类方法
-                    List<ExecutableElement> overrideMethodBySuperMethod = getOverrideMethodBySuperMethod(methodWithCallSuperList, typeElement);
-                    //如果有重写父类的方法，校验这个方法第一行是否有调用 super.xxxx
+                //如果有重写父类的方法，校验这个方法第一行是否有调用 super.xxxx
 
                     /*
                      校验步骤:
@@ -100,28 +101,27 @@ public class MustCallSuperProcessor extends AbstractProcessor {
                      我先用方案2尝试了一下，在类没有其它依赖的情况下 效果不错，但是类依赖其它类，编译就比较麻烦
                      最后这个例子还是选择方案1实现，但是如类型判断 还有些不严谨
                      */
-                    if (!overrideMethodBySuperMethod.isEmpty()) {
+                if (!methodsWithCusAnnotation.isEmpty()) {
 
-                        String overrideMethodsStr = overrideMethodBySuperMethod.stream().map(it -> it.getSimpleName().toString())
-                                .collect(Collectors.joining());
+                    String overrideMethodsStr = methodsWithCusAnnotation.stream().map(it -> it.getSimpleName().toString())
+                            .collect(Collectors.joining());
 
-                        messager.printMessage(Diagnostic.Kind.NOTE, "Current class: " + typeElement.getQualifiedName()
-                                + " override supClass methods: " + overrideMethodsStr);
+                    messager.printMessage(Diagnostic.Kind.NOTE, "Current class: " + typeElement.getQualifiedName()
+                            + " override supClass methods: " + overrideMethodsStr);
 
-                        //获取类源码
-                        String classSourceCode = getClassSourceCode(typeElement);
+                    //获取类源码
+                    String classSourceCode = getClassSourceCode(typeElement);
 
-                        for (ExecutableElement executableElement : overrideMethodBySuperMethod) {
+                    for (ExecutableElement executableElement : methodsWithCusAnnotation) {
 
-                            //3. 判断源码中, 方法第一行是否有调用 super.xxxx
-                            boolean b = checkFirstStatementCallSuper(classSourceCode, executableElement);
+                        //3. 判断源码中, 方法第一行是否有调用 super.xxxx
+                        boolean b = checkFirstStatementCallSuper(classSourceCode, executableElement);
 
-                            if (!b) {
-                                //4. 校验不通过，抛异常
-                                throw new MustCallSuperException("class: " + "[" + typeElement.getQualifiedName().toString() + "],"
-                                        + " method: " + "[" + executableElement.getSimpleName().toString() + "]"
-                                        + " 第一行没调用父类的此方法");
-                            }
+                        if (!b) {
+                            //4. 校验不通过，抛异常
+                            throw new MustCallSuperException("class: " + "[" + typeElement.getQualifiedName().toString() + "],"
+                                    + " method: " + "[" + executableElement.getSimpleName().toString() + "]"
+                                    + " 第一行没调用父类的此方法");
                         }
                     }
                 }
@@ -130,74 +130,77 @@ public class MustCallSuperProcessor extends AbstractProcessor {
         return false;
     }
 
+
     /**
-     * 根据当前元素 获取父类有自定义注解的方法
+     * 获取当前类中，重写过并且有自定义MustCallSuper注解的方法
      *
-     * @param typeElement
+     * @param cuElement
      * @return
      */
-    private List<ExecutableElement> getSupClassMethodsWithCusAnnotation(TypeElement typeElement) {
-        List<ExecutableElement> list = new ArrayList<>();
-        TypeMirror superclass = typeElement.getSuperclass();
-        TypeElement superclassElement = (TypeElement) types.asElement(superclass);
-        List<? extends Element> enclosedElements = superclassElement.getEnclosedElements();
-        for (Element element : enclosedElements) {
-            if (element.getKind() == ElementKind.METHOD) {
-                ExecutableElement method = (ExecutableElement) element;
-                List<? extends AnnotationMirror> annotationMirrors = method.getAnnotationMirrors();
-                for (AnnotationMirror annotationMirror : annotationMirrors) {
-                    String annotationStr = annotationMirror.toString();
-                    if (annotationStr.equals(CALL_SUPER_ANNOTATION_NAME)) {
-                        list.add(method);
-                    }
+    private List<ExecutableElement> getOverrideMethodsWithCusAnnotationOfCuClass(TypeElement cuElement) {
+        List<ExecutableElement> cuMethods = cuElement.getEnclosedElements()
+                .stream().filter(it -> it.getKind() == ElementKind.METHOD)
+                .map(ExecutableElement.class::cast)
+                .collect(Collectors.toList());
+        TypeMirror superclass = cuElement.getSuperclass();
+        TypeElement parentElement = (TypeElement) types.asElement(superclass);
+        return getMethodsByParentRecursive(cuMethods, cuElement, parentElement, new ArrayList<>());
+    }
+
+    /**
+     * 通过父类，递归获取满足条件的当前类方法
+     *
+     * @param targetClaMethods 目标子类的方法(固定的)
+     * @param targetElement    目标子类(固定的)
+     * @param parentElement    父类(递归向上)
+     * @param resultMethods    结果集
+     * @return
+     */
+    private List<ExecutableElement> getMethodsByParentRecursive(List<ExecutableElement> targetClaMethods,
+                                                                TypeElement targetElement,
+                                                                TypeElement parentElement,
+                                                                List<ExecutableElement> resultMethods) {
+        Elements utils = processingEnv.getElementUtils();
+
+        String objName = Object.class.getName();
+        //当目标子类方法都被查找过，或者已经遍历到 java.lang.Object 中止递归
+        if (targetClaMethods.isEmpty() || parentElement.getQualifiedName().toString().equals(objName)) {
+            return resultMethods;
+        }
+
+        List<ExecutableElement> parentMethods = QUALIFIED_NAME_2_METHODS_CACHE_MAP.get(parentElement.getQualifiedName().toString());
+        if (parentMethods == null) {
+            //获取父类中，有自定义注解 com.rxf113.MustCallSuper 的非抽象方法
+            parentMethods = parentElement.getEnclosedElements()
+                    .stream()
+                    .filter(it -> it.getKind() == ElementKind.METHOD
+                            && !it.getModifiers().contains(Modifier.ABSTRACT))
+                    //有自定义注解
+                    .filter(it -> it.getAnnotationMirrors().stream()
+                            .anyMatch(annotation -> annotation.toString().equals(CALL_SUPER_ANNOTATION_NAME)))
+                    .map(ExecutableElement.class::cast).collect(Collectors.toList());
+
+            QUALIFIED_NAME_2_METHODS_CACHE_MAP.put(parentElement.getQualifiedName().toString(), parentMethods);
+        }
+
+
+        Iterator<ExecutableElement> iterator = targetClaMethods.iterator();
+        while (iterator.hasNext()) {
+            ExecutableElement targetClaMethod = iterator.next();
+            for (ExecutableElement parentMethod : parentMethods) {
+                if (utils.overrides(targetClaMethod, parentMethod, targetElement)) {
+                    //满足条件的方法，加入结果集
+                    resultMethods.add(targetClaMethod);
+                    //并移除此方法
+                    iterator.remove();
                 }
             }
         }
-        return list;
-    }
 
-    /**
-     * 根据父类方法获取当前类重写了父类方法的当前类方法
-     *
-     * @param superMethods
-     * @param typeElement
-     * @return
-     */
-    private List<ExecutableElement> getOverrideMethodBySuperMethod(List<ExecutableElement> superMethods, TypeElement typeElement) {
-        List<ExecutableElement> list = new ArrayList<>();
-
-        List<? extends Element> enclosedElements = typeElement.getEnclosedElements();
-        for (Element element : enclosedElements) {
-            if (element.getKind() == ElementKind.METHOD) {
-                ExecutableElement method = (ExecutableElement) element;
-                Optional<ExecutableElement> first = superMethods.stream().filter(it -> isMethodSame(it, method)).findFirst();
-                first.ifPresent(list::add);
-            }
-        }
-        return list;
-    }
-
-    private boolean isMethodSame(ExecutableElement parentMethod, ExecutableElement sonMethod) {
-        boolean b = parentMethod.getSimpleName().equals(sonMethod.getSimpleName()) &&
-                parentMethod.getReturnType().equals(sonMethod.getReturnType());
-        if (!b) {
-            return false;
-        }
-//        parentMethod.getParameters().equals(sonMethod.getParameters())
-        List<? extends VariableElement> paParameters = parentMethod.getParameters();
-        List<? extends VariableElement> sonParameters = sonMethod.getParameters();
-        if (paParameters.size() != sonParameters.size()) {
-            return false;
-        }
-        if (paParameters.isEmpty()) {
-            return true;
-        }
-        for (int i = 0; i < paParameters.size(); i++) {
-            if (!paParameters.get(i).toString().equals(sonParameters.get(i).toString())) {
-                return false;
-            }
-        }
-        return true;
+        //递归查找父类
+        TypeMirror superclass = parentElement.getSuperclass();
+        parentElement = (TypeElement) types.asElement(superclass);
+        return getMethodsByParentRecursive(targetClaMethods, targetElement, parentElement, resultMethods);
     }
 
     /**
@@ -225,7 +228,8 @@ public class MustCallSuperProcessor extends AbstractProcessor {
             String pTypeStr = pMethod.getParameters().get(i).asType().toString();
             String jpTypeStr = jpMethod.getParameters().get(i).getType().toString();
             if (!pTypeStr.endsWith(jpTypeStr)) {
-                //eg: pTypeStr == java.lang.Integer jpTYpeStr == Integer , 这里不一定完全正确，跟导包有关 todo
+                //eg: pTypeStr == java.lang.Integer jpTYpeStr == Integer , 这里不一定完全正确，跟导包有关
+                //例如 pTypeStr == com.rxf113.Integer, jpTYpeStr == Integer 判断是正确的，但实际不正确 todo
                 return false;
             }
         }
@@ -299,6 +303,9 @@ public class MustCallSuperProcessor extends AbstractProcessor {
         BlockStmt body = stmtOptional.get();
 
         List<Statement> statements = body.getStatements();
+        if (statements.isEmpty()) {
+            return false;
+        }
         //当前方法第一段代码
         Statement firstStatement = statements.get(0);
 
@@ -310,54 +317,35 @@ public class MustCallSuperProcessor extends AbstractProcessor {
                 if (!optionalExpression.isPresent()) {
                     return false;
                 }
-                //判断源码中方法第一行是否调用的super. 并且方法与当前 targetJpMethod 中的方法相同(方法名+参数名+参数个数+参数类型) //todo 参数类型暂时没实现好
                 if ("super".equals(optionalExpression.get().toString())) {
-                    //1. 判断方法名是否等于  targetJpMethod
+                    //方法名相等，并且方法的参数名也相等，认为是调用的父类方法
+                    //例如以下: 首先判断 testMethod == testMethod， 然后判断 a, b == a, b
+                    //    public void testMethod(Integer a, String b) {
+                    //        super.testMethod(a, b);
+                    //    }
+
+                    //判断方法名是否等于  targetJpMethod
                     String callMethodName = methodCall.getName().asString();
                     if (callMethodName.equals(targetJpMethod.getName().asString())) {
-                        //2. 再判断 参数 是否等于  targetJpMethod
-                        return checkMethodParametersEq(methodCall, targetJpMethod);
+                        //再判断 参数名 是否等于  targetJpMethod
+
+                        //提取 methodCall 参数名
+                        Matcher matcher = CONTENT_IN_PARENTHESES_PATTERN.matcher(methodCall.toString());
+                        if (matcher.find()) {
+                            String methodCallParamName = matcher.group(1);
+
+                            //提取 targetJpMethod 参数名
+                            String targetJpMethodParamName = targetJpMethod.getParameters()
+                                    .stream()
+                                    .map(it -> it.getName().toString())
+                                    .collect(Collectors.joining(", "));
+
+                            return methodCallParamName.equals(targetJpMethodParamName);
+                        }
                     }
                 }
             }
         }
         return false;
-
-    }
-
-    /**
-     * 判断两个方法参数是否相同(长度 + 类型)
-     *
-     * @param methodCall
-     * @param targetJpMethod
-     * @return
-     */
-    private boolean checkMethodParametersEq(MethodCallExpr methodCall, MethodDeclaration targetJpMethod) {
-        NodeList<Expression> arguments = methodCall.getArguments();
-        NodeList<Parameter> parameters = targetJpMethod.getParameters();
-        //先简但判断长度
-        return arguments.size() == parameters.size();
-        //todo 类型匹配
-//        if (arguments.size() != parameters.size()) {
-//            return false;
-//        }
-//        if (arguments.isEmpty()) {
-//            return true;
-//        }
-//        for (int i = 0; i < arguments.size(); i++) {
-//            ResolvedType resolvedType = symbolSolver.calculateType(arguments.get(i));
-//            String argTypeStr = null;
-//            if (resolvedType instanceof ReferenceTypeImpl){
-//                argTypeStr = ((ReferenceTypeImpl) resolvedType).getTypeDeclaration().get().getClassName();
-//            }else if (resolvedType instanceof ResolvedPrimitiveType){
-//                argTypeStr = ((ResolvedPrimitiveType) resolvedType).getBoxTypeQName();
-//            }
-//
-//            String paTypeStr = parameters.get(i).getType().toString();
-//            if (!paTypeStr.equals(argTypeStr)) {
-//                return false;
-//            }
-//        }
-//        return true;
     }
 }
