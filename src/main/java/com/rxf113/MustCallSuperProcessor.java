@@ -25,6 +25,8 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +44,8 @@ public class MustCallSuperProcessor extends AbstractProcessor {
     private static final String FILE_SEPARATOR = File.separator;
 
     private Messager messager;
+
+    private static final Pattern CONTENT_IN_PARENTHESES_PATTERN = Pattern.compile("\\((.*?)\\)");
 
     /**
      * key: 全限类名，value: 类的所有方法。
@@ -224,7 +228,8 @@ public class MustCallSuperProcessor extends AbstractProcessor {
             String pTypeStr = pMethod.getParameters().get(i).asType().toString();
             String jpTypeStr = jpMethod.getParameters().get(i).getType().toString();
             if (!pTypeStr.endsWith(jpTypeStr)) {
-                //eg: pTypeStr == java.lang.Integer jpTYpeStr == Integer , 这里不一定完全正确，跟导包有关 todo
+                //eg: pTypeStr == java.lang.Integer jpTYpeStr == Integer , 这里不一定完全正确，跟导包有关
+                //例如 pTypeStr == com.rxf113.Integer, jpTYpeStr == Integer 判断是正确的，但实际不正确 todo
                 return false;
             }
         }
@@ -298,6 +303,9 @@ public class MustCallSuperProcessor extends AbstractProcessor {
         BlockStmt body = stmtOptional.get();
 
         List<Statement> statements = body.getStatements();
+        if (statements.isEmpty()) {
+            return false;
+        }
         //当前方法第一段代码
         Statement firstStatement = statements.get(0);
 
@@ -309,54 +317,35 @@ public class MustCallSuperProcessor extends AbstractProcessor {
                 if (!optionalExpression.isPresent()) {
                     return false;
                 }
-                //判断源码中方法第一行是否调用的super. 并且方法与当前 targetJpMethod 中的方法相同(方法名+参数名+参数个数+参数类型) //todo 参数类型暂时没实现好
                 if ("super".equals(optionalExpression.get().toString())) {
-                    //1. 判断方法名是否等于  targetJpMethod
+                    //方法名相等，并且方法的参数名也相等，认为是调用的父类方法
+                    //例如以下: 首先判断 testMethod == testMethod， 然后判断 a, b == a, b
+                    //    public void testMethod(Integer a, String b) {
+                    //        super.testMethod(a, b);
+                    //    }
+
+                    //判断方法名是否等于  targetJpMethod
                     String callMethodName = methodCall.getName().asString();
                     if (callMethodName.equals(targetJpMethod.getName().asString())) {
-                        //2. 再判断 参数 是否等于  targetJpMethod
-                        return checkMethodParametersEq(methodCall, targetJpMethod);
+                        //再判断 参数名 是否等于  targetJpMethod
+
+                        //提取 methodCall 参数名
+                        Matcher matcher = CONTENT_IN_PARENTHESES_PATTERN.matcher(methodCall.toString());
+                        if (matcher.find()) {
+                            String methodCallParamName = matcher.group(1);
+
+                            //提取 targetJpMethod 参数名
+                            String targetJpMethodParamName = targetJpMethod.getParameters()
+                                    .stream()
+                                    .map(it -> it.getName().toString())
+                                    .collect(Collectors.joining(", "));
+
+                            return methodCallParamName.equals(targetJpMethodParamName);
+                        }
                     }
                 }
             }
         }
         return false;
-
-    }
-
-    /**
-     * 判断两个方法参数是否相同(长度 + 类型)
-     *
-     * @param methodCall
-     * @param targetJpMethod
-     * @return
-     */
-    private boolean checkMethodParametersEq(MethodCallExpr methodCall, MethodDeclaration targetJpMethod) {
-        NodeList<Expression> arguments = methodCall.getArguments();
-        NodeList<Parameter> parameters = targetJpMethod.getParameters();
-        //先简但判断长度
-        return arguments.size() == parameters.size();
-        //todo 类型匹配
-//        if (arguments.size() != parameters.size()) {
-//            return false;
-//        }
-//        if (arguments.isEmpty()) {
-//            return true;
-//        }
-//        for (int i = 0; i < arguments.size(); i++) {
-//            ResolvedType resolvedType = symbolSolver.calculateType(arguments.get(i));
-//            String argTypeStr = null;
-//            if (resolvedType instanceof ReferenceTypeImpl){
-//                argTypeStr = ((ReferenceTypeImpl) resolvedType).getTypeDeclaration().get().getClassName();
-//            }else if (resolvedType instanceof ResolvedPrimitiveType){
-//                argTypeStr = ((ResolvedPrimitiveType) resolvedType).getBoxTypeQName();
-//            }
-//
-//            String paTypeStr = parameters.get(i).getType().toString();
-//            if (!paTypeStr.equals(argTypeStr)) {
-//                return false;
-//            }
-//        }
-//        return true;
     }
 }
