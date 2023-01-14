@@ -11,6 +11,7 @@ import java.util.List;
 /**
  * 测试类，运行前提，也需要先清空spi文件，然后编译项目，之后再跑test
  * 功能: 手动编译java文件，触发 com.rxf113.MustCallSuperProcessor 中的 process 方法
+ * 将触发对 {@link com.test.TestSon} 的编译
  */
 public class MustCallSuperTest {
 
