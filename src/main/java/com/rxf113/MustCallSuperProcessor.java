@@ -43,6 +43,11 @@ public class MustCallSuperProcessor extends AbstractProcessor {
 
     private Messager messager;
 
+    /**
+     * key: 全限类名，value: 类的所有方法。
+     * 目的：缓存类及对应方法，提高效率
+     */
+    private static final Map<String, List<ExecutableElement>> QUALIFIED_NAME_2_METHODS_CACHE_MAP = new HashMap<>(64, 1);
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
@@ -159,14 +164,20 @@ public class MustCallSuperProcessor extends AbstractProcessor {
             return resultMethods;
         }
 
-        //获取父类中，有自定义注解 com.rxf113.MustCallSuper 的方法
-        List<ExecutableElement> parentMethods = parentElement.getEnclosedElements()
-                .stream()
-                .filter(it -> it.getKind() == ElementKind.METHOD)
-                //有自定义注解
-                .filter(it -> it.getAnnotationMirrors().stream()
-                        .anyMatch(annotation -> annotation.toString().equals(CALL_SUPER_ANNOTATION_NAME)))
-                .map(ExecutableElement.class::cast).collect(Collectors.toList());
+        List<ExecutableElement> parentMethods = QUALIFIED_NAME_2_METHODS_CACHE_MAP.get(parentElement.getQualifiedName().toString());
+        if (parentMethods == null) {
+            //获取父类中，有自定义注解 com.rxf113.MustCallSuper 的非抽象方法
+            parentMethods = parentElement.getEnclosedElements()
+                    .stream()
+                    .filter(it -> it.getKind() == ElementKind.METHOD
+                            && !it.getModifiers().contains(Modifier.ABSTRACT))
+                    //有自定义注解
+                    .filter(it -> it.getAnnotationMirrors().stream()
+                            .anyMatch(annotation -> annotation.toString().equals(CALL_SUPER_ANNOTATION_NAME)))
+                    .map(ExecutableElement.class::cast).collect(Collectors.toList());
+
+            QUALIFIED_NAME_2_METHODS_CACHE_MAP.put(parentElement.getQualifiedName().toString(), parentMethods);
+        }
 
 
         Iterator<ExecutableElement> iterator = targetClaMethods.iterator();
