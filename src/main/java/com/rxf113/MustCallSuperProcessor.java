@@ -217,11 +217,11 @@ public class MustCallSuperProcessor extends AbstractProcessor {
             return false;
         }
         List<? extends VariableElement> parameters = pMethod.getParameters();
-        NodeList<Parameter> parameters1 = jpMethod.getParameters();
-        if (parameters1.size() != parameters.size()) {
+        NodeList<Parameter> jpParameters = jpMethod.getParameters();
+        if (jpParameters.size() != parameters.size()) {
             return false;
         }
-        if (parameters1.isEmpty()) {
+        if (jpParameters.isEmpty()) {
             return true;
         }
         for (int i = 0; i < parameters.size(); i++) {
